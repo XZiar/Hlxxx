@@ -1,0 +1,698 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>图片网格解析工具</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { 
+  font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif; 
+  background: #1a1a2e; 
+  color: #eee; 
+  min-height: 100vh; 
+  padding: 20px;
+}
+
+#app { 
+  max-width: 1400px; 
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+h1 { 
+  font-size: 1.5em; 
+  text-align: center; 
+  color: #e94560; 
+  letter-spacing: 2px;
+  margin-bottom: 10px;
+}
+
+/* 上传区域 */
+#upload-section {
+  background: #16213e;
+  border-radius: 12px;
+  padding: 30px;
+  text-align: center;
+  border: 2px dashed #e94560;
+}
+
+#fileInput {
+  display: none;
+}
+
+.upload-btn {
+  display: inline-block;
+  padding: 12px 30px;
+  background: #e94560;
+  color: #fff;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 1em;
+  font-weight: 600;
+  transition: all 0.2s;
+}
+
+.upload-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(233, 69, 96, 0.4);
+}
+
+/* 预览区域 */
+#preview-section {
+  display: none;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.preview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 20px;
+}
+
+.preview-card {
+  background: #16213e;
+  border-radius: 12px;
+  padding: 15px;
+  border: 1px solid #333;
+}
+
+.preview-card h3 {
+  color: #e94560;
+  font-size: 1em;
+  margin-bottom: 12px;
+  border-bottom: 2px solid #e94560;
+  padding-bottom: 6px;
+}
+
+.preview-content {
+  min-height: 200px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #0f3460;
+  border-radius: 8px;
+  padding: 10px;
+  overflow: auto;
+}
+
+.preview-content canvas {
+  max-width: 100%;
+  height: auto;
+}
+
+/* 输出区域 */
+#output-section {
+  display: none;
+  background: #16213e;
+  border-radius: 12px;
+  padding: 20px;
+}
+
+#output-section h3 {
+  color: #e94560;
+  margin-bottom: 12px;
+}
+
+#gridOutput {
+  width: 100%;
+  height: 200px;
+  background: #0f3460;
+  color: #eee;
+  border: 1px solid #333;
+  border-radius: 8px;
+  padding: 12px;
+  font-family: 'Consolas', monospace;
+  font-size: 0.9em;
+  resize: vertical;
+}
+
+#output-section textarea:focus {
+  outline: none;
+  border-color: #e94560;
+}
+
+/* 按钮栏 */
+#toolbar {
+  display: flex;
+  gap: 10px;
+  margin-top: 15px;
+  flex-wrap: wrap;
+}
+
+#toolbar button {
+  padding: 10px 20px;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.9em;
+  font-weight: 600;
+  color: #fff;
+  transition: all 0.2s;
+}
+
+#toolbar button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+}
+
+.btn-copy { background: #43a047; }
+.btn-download { background: #1e88e5; }
+.btn-reset { background: #e94560; }
+
+/* 统计信息 */
+#stats-section {
+  display: none;
+  background: #16213e;
+  border-radius: 12px;
+  padding: 20px;
+}
+
+#stats-section h3 {
+  color: #e94560;
+  margin-bottom: 12px;
+}
+
+/* Toast */
+#toast {
+  position: fixed;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #333;
+  color: #fff;
+  padding: 12px 30px;
+  border-radius: 8px;
+  z-index: 200;
+  opacity: 0;
+  transition: opacity 0.3s;
+  pointer-events: none;
+  font-size: 0.95em;
+}
+
+#toast.show { opacity: 1; }
+#toast.success { background: #43a047; }
+#toast.error { background: #e94560; }
+
+/* 加载动画 */
+.loading {
+  display: inline-block;
+  width: 20px;
+  height: 20px;
+  border: 3px solid #f3f3f3;
+  border-top: 3px solid #e94560;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* 响应式 */
+@media (max-width: 768px) {
+  .preview-grid {
+    grid-template-columns: 1fr;
+  }
+}
+</style>
+</head>
+<body>
+
+<div id="toast"></div>
+
+<div id="app">
+  <h1>🖼️ 图片网格解析工具 - 感知哈希版</h1>
+  
+  <!-- 上传区域 -->
+  <div id="upload-section">
+    <p style="margin-bottom: 20px; color: #888;">
+      上传 14×10 网格的游戏截图，自动识别图标并生成网格数据
+    </p>
+    <input type="file" id="fileInput" accept="image/png">
+    <label class="upload-btn" for="fileInput">
+      📁 选择 PNG 图片
+    </label>
+    <p style="margin-top: 15px; font-size: 0.85em; color: #666;">
+      支持格式：PNG · 推荐尺寸：1000×1400 像素
+    </p>
+    
+    <!-- 参数设置区域 -->
+    <div id="params-section" style="margin-top: 25px; padding: 15px; background: #0f3460; border-radius: 8px; display: none;">
+      <!-- 边缘检测预览 -->
+      <div id="edge-detection-section" style="margin-bottom: 20px; display: none;">
+        <h3 style="color: #e94560; font-size: 0.95em; margin-bottom: 10px;">🔍 边缘检测结果</h3>
+        <div style="display: flex; gap: 15px; justify-content: center; flex-wrap: wrap;">
+          <div style="text-align: center;">
+            <p style="font-size: 0.85em; color: #aaa; margin-bottom: 5px;">灰度图（256px 宽）</p>
+            <div id="grayPreview" style="background: #000; border-radius: 4px; overflow: hidden;"></div>
+          </div>
+          <div style="text-align: center;">
+            <p style="font-size: 0.85em; color: #aaa; margin-bottom: 5px;">边缘标记（红色）</p>
+            <div id="edgePreview" style="background: #000; border-radius: 4px; overflow: hidden;"></div>
+          </div>
+        </div>
+      </div>
+    
+      <!-- 裁剪比例滑块 -->
+      <div style="margin-bottom: 20px;">
+        <h3 style="color: #e94560; font-size: 0.95em; margin-bottom: 10px;">✂️ 裁剪比例设置</h3>
+        
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 15px;">
+          <!-- 顶部 -->
+          <div>
+            <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+              <span style="font-size: 0.85em; color: #aaa;">顶部</span>
+              <strong id="cropTopValue" style="color: #43a047;">12%</strong>
+            </div>
+            <input type="range" id="cropTopSlider" min="0" max="30" value="12" step="0.1" 
+                   style="width: 100%; cursor: pointer;" 
+                   title="顶部裁剪比例">
+            <div style="text-align: center; margin-top: 4px; font-size: 0.75em; color: #666;">
+              <span id="cropTopPercent">12.0%</span>
+            </div>
+          </div>
+          
+          <!-- 底部 -->
+          <div>
+            <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+              <span style="font-size: 0.85em; color: #aaa;">底部</span>
+              <strong id="cropBottomValue" style="color: #43a047;">15%</strong>
+            </div>
+            <input type="range" id="cropBottomSlider" min="0" max="30" value="15" step="0.1" 
+                   style="width: 100%; cursor: pointer;" 
+                   title="底部裁剪比例">
+            <div style="text-align: center; margin-top: 4px; font-size: 0.75em; color: #666;">
+              <span id="cropBottomPercent">15.0%</span>
+            </div>
+          </div>
+        </div>
+        
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+          <!-- 左侧 -->
+          <div>
+            <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+              <span style="font-size: 0.85em; color: #aaa;">左侧</span>
+              <strong id="cropLeftValue" style="color: #43a047;">2%</strong>
+            </div>
+            <input type="range" id="cropLeftSlider" min="0" max="5" value="2" step="0.1" 
+                   style="width: 100%; cursor: pointer;" 
+                   title="左侧裁剪比例">
+            <div style="text-align: center; margin-top: 4px; font-size: 0.75em; color: #666;">
+              <span id="cropLeftPercent">2.0%</span>
+            </div>
+          </div>
+          
+          <!-- 右侧 -->
+          <div>
+            <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+              <span style="font-size: 0.85em; color: #aaa;">右侧</span>
+              <strong id="cropRightValue" style="color: #43a047;">2%</strong>
+            </div>
+            <input type="range" id="cropRightSlider" min="0" max="5" value="2" step="0.1" 
+                   style="width: 100%; cursor: pointer;" 
+                   title="右侧裁剪比例">
+            <div style="text-align: center; margin-top: 4px; font-size: 0.75em; color: #666;">
+              <span id="cropRightPercent">2.0%</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <!-- 阈值滑块 -->
+      <div style="margin-top: 20px; padding-top: 20px; border-top: 2px solid #333;">
+        <h3 style="color: #e94560; font-size: 0.95em; margin-bottom: 10px;">🎚️ 相似度阈值</h3>
+        <div style="display: flex; align-items: center; gap: 15px; justify-content: center;">
+          <span style="font-size: 0.85em; color: #aaa;">更严格</span>
+          <input type="range" id="thresholdSlider" min="0" max="15" value="5" step="1" 
+                 style="width: 300px; cursor: pointer;" 
+                 title="汉明距离阈值：越小越严格，越大越宽松">
+          <span style="font-size: 0.85em; color: #aaa;">更宽松</span>
+        </div>
+        <div style="text-align: center; margin-top: 8px; font-size: 0.9em;">
+          当前阈值：<strong id="thresholdValue" style="color: #e94560; font-size: 1.2em;">5</strong>
+          <span style="color: #888; margin-left: 10px;">（汉明距离 ≤ 此值视为相同图标）</span>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <!-- 预览区域 -->
+  <div id="preview-section">
+    <div class="preview-grid">
+      <!-- 原始图片 -->
+      <div class="preview-card">
+        <h3>📷 原始图片</h3>
+        <div class="preview-content" id="originalPreview"></div>
+      </div>
+      
+      <!-- 缩放裁剪后 -->
+      <div class="preview-card">
+        <h3>✂️ 裁剪后（网格区域）</h3>
+        <div class="preview-content" id="resizedPreview"></div>
+        <div id="cropInfo" style="margin-top: 10px; font-size: 0.8em; color: #888; text-align: center;"></div>
+      </div>
+      
+      <!-- 格子网格 -->
+      <div class="preview-card">
+        <h3>🔲 格子识别结果</h3>
+        <div class="preview-content" id="cellGridPreview"></div>
+      </div>
+    </div>
+    
+    <!-- 统计信息 -->
+    <div id="stats-section">
+      <h3>📊 识别统计</h3>
+      <div id="statsContent"></div>
+    </div>
+    
+    <!-- 输出区域 -->
+    <div id="output-section">
+      <h3>📝 解析结果</h3>
+      <p style="color: #888; font-size: 0.85em; margin-bottom: 10px;">
+        14 行网格数据，每行 10 个数字（空格分隔）
+      </p>
+      <textarea id="gridOutput" readonly></textarea>
+      
+      <div id="toolbar">
+        <button class="btn-copy" onclick="copyToClipboard()">📋 复制到剪贴板</button>
+        <button class="btn-download" onclick="downloadGrid()">💾 下载为文件</button>
+        <button class="btn-reset" onclick="resetParser()">🔄 重新解析</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="parse.js"></script>
+<script>
+// ============ 事件处理 ============
+
+let currentFile = null;
+// edgeDetectionResult, cropResult, matchResult 已在 parse.js 中声明
+
+let thresholdSlider = document.getElementById('thresholdSlider');
+let thresholdValue = document.getElementById('thresholdValue');
+let cropTopSlider = document.getElementById('cropTopSlider');
+let cropTopValue = document.getElementById('cropTopValue');
+let cropTopPercent = document.getElementById('cropTopPercent');
+let cropBottomSlider = document.getElementById('cropBottomSlider');
+let cropBottomValue = document.getElementById('cropBottomValue');
+let cropBottomPercent = document.getElementById('cropBottomPercent');
+let cropLeftSlider = document.getElementById('cropLeftSlider');
+let cropLeftValue = document.getElementById('cropLeftValue');
+let cropLeftPercent = document.getElementById('cropLeftPercent');
+let cropRightSlider = document.getElementById('cropRightSlider');
+let cropRightValue = document.getElementById('cropRightValue');
+let cropRightPercent = document.getElementById('cropRightPercent');
+let paramsSection = document.getElementById('params-section');
+let edgeDetectionSection = document.getElementById('edge-detection-section');
+
+// 文件选择事件 - 第一步：边缘检测
+document.getElementById('fileInput').addEventListener('change', async function(e) {
+  let file = e.target.files[0];
+  if (!file) return;
+  
+  if (file.type !== 'image/png') {
+    showToast('请选择 PNG 格式的图片', 'error');
+    return;
+  }
+  
+  currentFile = file;
+  
+  // 显示参数设置区域
+  paramsSection.style.display = 'block';
+  edgeDetectionSection.style.display = 'block';
+  
+  // 隐藏后续区域
+  document.getElementById('preview-section').style.display = 'none';
+  document.getElementById('output-section').style.display = 'none';
+  document.getElementById('stats-section').style.display = 'none';
+  
+  showToast('正在进行边缘检测...', 'success');
+  
+  try {
+    // 执行边缘检测
+    edgeDetectionResult = await performEdgeDetection(file);
+    
+    // 显示原始图片
+    renderOriginalPreview(edgeDetectionResult.originalCanvas);
+    
+    // 显示灰度图和边缘标记
+    let grayPreview = document.getElementById('grayPreview');
+    let edgePreview = document.getElementById('edgePreview');
+    grayPreview.innerHTML = '';
+    edgePreview.innerHTML = '';
+    
+    // 缩放显示（宽度 200px）
+    let grayImg = document.createElement('img');
+    grayImg.src = edgeDetectionResult.grayCanvas.toDataURL('image/png');
+    grayImg.style.width = '200px';
+    grayImg.style.height = 'auto';
+    grayPreview.appendChild(grayImg);
+    
+    let edgeImg = document.createElement('img');
+    edgeImg.src = edgeDetectionResult.edgeCanvas.toDataURL('image/png');
+    edgeImg.style.width = '200px';
+    edgeImg.style.height = 'auto';
+    edgePreview.appendChild(edgeImg);
+    
+    // 更新滑块为边缘检测的结果
+    let ratios = edgeDetectionResult.cropRatios;
+    CROP_TOP_RATIO = ratios.top;
+    CROP_BOTTOM_RATIO = ratios.bottom;
+    CROP_LEFT_RATIO = ratios.left;
+    CROP_RIGHT_RATIO = ratios.right;
+    
+    updateCropSliders();
+    
+    showToast('边缘检测完成！自动进行裁剪和解析...', 'success');
+    
+    // 自动进行裁剪和解析
+    await performCropAndMatch();
+    
+  } catch (err) {
+    console.error(err);
+    showToast('边缘检测失败：' + err.message, 'error');
+  }
+});
+
+// 执行裁剪和匹配
+async function performCropAndMatch() {
+  if (!currentFile) return;
+  
+  showToast('正在裁剪图片并解析格子...', 'success');
+  
+  try {
+    // 第一阶段：裁剪
+    cropResult = await cropGridRegion(
+      currentFile,
+      CROP_TOP_RATIO,
+      CROP_BOTTOM_RATIO,
+      CROP_LEFT_RATIO,
+      CROP_RIGHT_RATIO
+    );
+    
+    // 显示裁剪后的网格区域
+    renderResizedPreview(cropResult.croppedCanvas, 'resizedPreview');
+    
+    // 更新裁剪信息
+    let cropInfo = document.getElementById('cropInfo');
+    cropInfo.innerHTML = `裁剪区域：${cropResult.cropParams.w}×${cropResult.cropParams.h} · 格子尺寸：${cropResult.cellW}×${cropResult.cellH}`;
+    
+    // 第二阶段：哈希匹配
+    matchResult = matchHashes(cropResult.cellCanvases, SIMILARITY_THRESHOLD);
+    
+    // 显示格子网格
+    renderCellGrid(matchResult.gridHashes, 'cellGridPreview');
+    
+    // 显示统计信息
+    renderStats(matchResult.stats, 'statsContent');
+    document.getElementById('stats-section').style.display = 'block';
+    
+    // 输出网格
+    let gridText = exportGridText(matchResult.grid);
+    document.getElementById('gridOutput').value = gridText;
+    document.getElementById('output-section').style.display = 'block';
+    document.getElementById('preview-section').style.display = 'flex';
+    
+    showToast('解析成功！共识别 ' + matchResult.stats.uniqueIcons + ' 个唯一图标', 'success');
+    
+  } catch (err) {
+    console.error(err);
+    showToast('解析失败：' + err.message, 'error');
+  }
+}
+
+// 阈值滑块事件（只重新匹配哈希，不重新裁剪）
+thresholdSlider.addEventListener('change', function() {
+  if (!cropResult) return;
+  
+  let newThreshold = parseInt(thresholdSlider.value);
+  thresholdValue.textContent = newThreshold;
+  SIMILARITY_THRESHOLD = newThreshold;
+  
+  showToast('正在重新匹配哈希（阈值=' + newThreshold + '）...', 'success');
+  
+  try {
+    // 只重新做哈希匹配（第四步）
+    matchResult = matchHashes(cropResult.cellCanvases, newThreshold);
+    
+    // 更新显示
+    renderCellGrid(matchResult.gridHashes, 'cellGridPreview');
+    renderStats(matchResult.stats, 'statsContent');
+    
+    let gridText = exportGridText(matchResult.grid);
+    document.getElementById('gridOutput').value = gridText;
+    
+    showToast('重新匹配完成！', 'success');
+    
+  } catch (err) {
+    console.error(err);
+    showToast('重新匹配失败：' + err.message, 'error');
+  }
+});
+
+// 实时显示阈值（拖动时）
+thresholdSlider.addEventListener('input', function() {
+  thresholdValue.textContent = thresholdSlider.value;
+});
+
+// 更新裁剪滑块显示
+function updateCropSliders() {
+  cropTopSlider.value = (CROP_TOP_RATIO * 100).toFixed(1);
+  cropBottomSlider.value = (CROP_BOTTOM_RATIO * 100).toFixed(1);
+  cropLeftSlider.value = (CROP_LEFT_RATIO * 100).toFixed(1);
+  cropRightSlider.value = (CROP_RIGHT_RATIO * 100).toFixed(1);
+  
+  cropTopValue.textContent = (CROP_TOP_RATIO * 100).toFixed(1) + '%';
+  cropBottomValue.textContent = (CROP_BOTTOM_RATIO * 100).toFixed(1) + '%';
+  cropLeftValue.textContent = (CROP_LEFT_RATIO * 100).toFixed(1) + '%';
+  cropRightValue.textContent = (CROP_RIGHT_RATIO * 100).toFixed(1) + '%';
+  
+  cropTopPercent.textContent = (CROP_TOP_RATIO * 100).toFixed(1) + '%';
+  cropBottomPercent.textContent = (CROP_BOTTOM_RATIO * 100).toFixed(1) + '%';
+  cropLeftPercent.textContent = (CROP_LEFT_RATIO * 100).toFixed(1) + '%';
+  cropRightPercent.textContent = (CROP_RIGHT_RATIO * 100).toFixed(1) + '%';
+}
+
+// 顶部裁剪滑块事件
+cropTopSlider.addEventListener('input', function() {
+  let val = parseFloat(cropTopSlider.value).toFixed(1) + '%';
+  cropTopPercent.textContent = val;
+  cropTopValue.textContent = val;
+  CROP_TOP_RATIO = parseFloat(cropTopSlider.value) / 100;
+});
+
+cropTopSlider.addEventListener('change', async function() {
+  if (!currentFile) return;
+  showToast('正在重新裁剪...', 'success');
+  await performCropAndMatch();
+});
+
+// 底部裁剪滑块事件
+cropBottomSlider.addEventListener('input', function() {
+  let val = parseFloat(cropBottomSlider.value).toFixed(1) + '%';
+  cropBottomPercent.textContent = val;
+  cropBottomValue.textContent = val;
+  CROP_BOTTOM_RATIO = parseFloat(cropBottomSlider.value) / 100;
+});
+
+cropBottomSlider.addEventListener('change', async function() {
+  if (!currentFile) return;
+  showToast('正在重新裁剪...', 'success');
+  await performCropAndMatch();
+});
+
+// 左侧裁剪滑块事件
+cropLeftSlider.addEventListener('input', function() {
+  let val = parseFloat(cropLeftSlider.value).toFixed(1) + '%';
+  cropLeftPercent.textContent = val;
+  cropLeftValue.textContent = val;
+  CROP_LEFT_RATIO = parseFloat(cropLeftSlider.value) / 100;
+});
+
+cropLeftSlider.addEventListener('change', async function() {
+  if (!currentFile) return;
+  showToast('正在重新裁剪...', 'success');
+  await performCropAndMatch();
+});
+
+// 右侧裁剪滑块事件
+cropRightSlider.addEventListener('input', function() {
+  let val = parseFloat(cropRightSlider.value).toFixed(1) + '%';
+  cropRightPercent.textContent = val;
+  cropRightValue.textContent = val;
+  CROP_RIGHT_RATIO = parseFloat(cropRightSlider.value) / 100;
+});
+
+cropRightSlider.addEventListener('change', async function() {
+  if (!currentFile) return;
+  showToast('正在重新裁剪...', 'success');
+  await performCropAndMatch();
+});
+
+// 渲染原始图片预览
+function renderOriginalPreview(canvas) {
+  let container = document.getElementById('originalPreview');
+  container.innerHTML = '';
+  
+  let preview = document.createElement('canvas');
+  preview.width = 200;
+  preview.height = Math.floor(200 * canvas.height / canvas.width);
+  let ctx = preview.getContext('2d');
+  ctx.drawImage(canvas, 0, 0, preview.width, preview.height);
+  
+  container.appendChild(preview);
+}
+
+function copyToClipboard() {
+  let output = document.getElementById('gridOutput');
+  output.select();
+  document.execCommand('copy');
+  showToast('已复制到剪贴板', 'success');
+}
+
+function downloadGrid() {
+  let gridText = document.getElementById('gridOutput').value;
+  let blob = new Blob([gridText], { type: 'text/plain' });
+  let url = URL.createObjectURL(blob);
+  let a = document.createElement('a');
+  a.href = url;
+  a.download = 'grid_' + new Date().getTime() + '.txt';
+  a.click();
+  URL.revokeObjectURL(url);
+  showToast('文件已下载', 'success');
+}
+
+function resetParser() {
+  document.getElementById('fileInput').value = '';
+  document.getElementById('params-section').style.display = 'none';
+  document.getElementById('preview-section').style.display = 'none';
+  document.getElementById('output-section').style.display = 'none';
+  document.getElementById('stats-section').style.display = 'none';
+  edgeDetectionSection.style.display = 'none';
+  currentFile = null;
+  edgeDetectionResult = null;
+  cropResult = null;
+  matchResult = null;
+  thresholdSlider.value = 5;
+  thresholdValue.textContent = '5';
+  showToast('已重置', 'success');
+}
+
+function showToast(msg, type) {
+  let el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = type || '';
+  el.classList.add('show');
+  setTimeout(() => {
+    el.classList.remove('show');
+  }, 2500);
+}
+</script>
+</body>
+</html>

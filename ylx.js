@@ -1,9 +1,9 @@
 // ============ 常量 ============
 const ROWS = 14;
 const COLS = 10;
-const MAX_ID = 32;
+const MAX_ID = 48;
 
-// 生成 32 色（HSL 色环均分）
+// 生成 HSL 色环均分
 const COLORS = [];
 for (let i = 0; i <= MAX_ID; i++) {
   if (i === 0) { COLORS[i] = ''; continue; }
@@ -249,7 +249,7 @@ function initGrid() {
   // 随机挑选ID，每个插入两次，重复至填满140格，然后洗牌
   let pool = [];
   while (pool.length < ROWS * COLS) {
-    let id = Math.floor(Math.random() * MAX_ID) + 1; // 1~32
+    let id = Math.floor(Math.random() * MAX_ID) + 1; // 1~MAX_ID
     pool.push(id, id);
   }
   pool = pool.slice(0, ROWS * COLS); // 截断到恰好140
@@ -587,9 +587,18 @@ function highlightCell(r, c, cls) {
 
 // ============ 推导 ============
 
-/** 统计某方向的最大连续空格数 */
+/** 
+ * 统计某方向可推动的最大格数。
+ * 需要先跨过会被一起推动的非空链条，在统计链条后方连续的空格数。 
+ */
 function countEmptyDir(r, c, dr, dc) {
-  let er = r + dr, ec = c + dc;
+  let er = r, ec = c;
+
+  while (er >= 0 && er < ROWS && ec >= 0 && ec < COLS && getCell(grid, er, ec) !== 0) {
+    er += dr;
+    ec += dc;
+  }
+
   let count = 0;
   while (er >= 0 && er < ROWS && ec >= 0 && ec < COLS && getCell(grid, er, ec) === 0) {
     count++;
