@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>直线消除 - 14×10</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif; background: #1a1a2e; color: #eee; min-height: 100vh; display: flex; justify-content: center; align-items: flex-start; padding: 8px; }
+#app { display: flex; flex-direction: column; gap: 8px; max-width: 800px; width: 100%; margin-top: 2px; align-items: center; }
+
+/* header */
+#header { display: flex; flex-direction: column; gap: 6px; align-items: center; width: 100%; }
+h1 { font-size: 1.1em; text-align: center; color: #e94560; letter-spacing: 2px; }
+
+/* 按钮栏 */
+#toolbar { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
+#toolbar button { padding: 5px 10px; border: none; border-radius: 5px; cursor: pointer; font-size: 0.78em; font-weight: 600; transition: all 0.2s; color: #fff; }
+#toolbar button:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
+#toolbar button:active { transform: translateY(0); }
+.btn-init { background: #0f3460; }
+.btn-import-grid { background: #533483; }
+.btn-export-grid { background: #533483; }
+.btn-export-steps { background: #16213e; }
+.btn-import-steps { background: #16213e; }
+.btn-edit { background: #e94560; }
+.btn-edit.active { background: #0f0; color: #000; }
+.btn-hint { background: #e67e22; }
+.btn-auto { background: #27ae60; }
+.btn-auto.running { background: #c0392b; }
+
+/* 图例 */
+#legend { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; font-size: 0.75em; align-items: center; }
+#legend span { padding: 3px 8px; border-radius: 4px; }
+
+/* 主要内容行：网格 | 操作历史 */
+#main-row { display: flex; gap: 14px; align-items: flex-start; }
+
+/* 网格 */
+#grid-container { display: flex; justify-content: center; }
+#grid { display: grid; grid-template-columns: repeat(10, 38px); grid-template-rows: repeat(14, 38px); gap: 1px; background: #16213e; padding: 3px; border-radius: 8px; user-select: none; }
+.cell { width: 38px; height: 38px; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 0.9em; cursor: pointer; transition: transform 0.1s, box-shadow 0.1s; position: relative; font-weight: 600; }
+.cell:hover { transform: scale(1.05); z-index: 2; }
+.cell.empty { background: rgba(255,255,255,0.05); cursor: default; }
+.cell.empty:hover { transform: none; }
+.cell.selected { box-shadow: 0 0 0 3px #e94560; z-index: 3; }
+.cell.highlight { box-shadow: 0 0 0 3px #f0c040; z-index: 3; }
+.cell.drag-preview { opacity: 0.6; }
+
+/* 右侧面板 */
+#right-panel { display: flex; flex-direction: column; gap: 6px; min-width: 230px; max-width: 320px; flex: 1; }
+#right-panel h2 { font-size: 0.95em; color: #e94560; border-bottom: 2px solid #e94560; padding-bottom: 3px; }
+#history { background: #16213e; border-radius: 8px; padding: 8px; max-height: 495px; overflow-y: auto; font-family: 'Consolas', 'Courier New', monospace; font-size: 0.72em; line-height: 1.5; }
+#history .entry { padding: 4px 6px; border-bottom: 1px solid rgba(255,255,255,0.06); }
+#history .entry:last-child { border-bottom: none; }
+#history .entry.clear-type { color: #43a047; }
+#history .entry.move-type { color: #1e88e5; }
+#history .entry .idx { color: #888; margin-right: 6px; }
+#history .empty-hint { color: #555; text-align: center; padding: 20px; }
+
+/* 弹出框 */
+.modal-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); z-index: 100; justify-content: center; align-items: center; }
+.modal-overlay.show { display: flex; }
+.modal { background: #1a1a2e; border: 2px solid #e94560; border-radius: 12px; padding: 20px; min-width: 360px; max-width: 500px; }
+.modal h3 { color: #e94560; margin-bottom: 12px; }
+.modal textarea { width: 100%; height: 200px; background: #0f3460; color: #eee; border: 1px solid #333; border-radius: 6px; padding: 10px; font-family: 'Consolas', monospace; font-size: 0.85em; resize: vertical; }
+.modal textarea:focus { outline: none; border-color: #e94560; }
+.modal-buttons { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
+.modal-buttons button { padding: 7px 18px; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; color: #fff; }
+.modal-buttons .btn-confirm { background: #e94560; }
+.modal-buttons .btn-cancel { background: #333; }
+
+/* Toast */
+#toast { position: fixed; top: 20px; left: 50%; transform: translateX(-50%); background: #333; color: #fff; padding: 10px 24px; border-radius: 8px; z-index: 200; opacity: 0; transition: opacity 0.3s; pointer-events: none; font-size: 0.9em; }
+#toast.show { opacity: 1; }
+#toast.error { background: #e94560; }
+#toast.success { background: #43a047; }
+
+/* 响应式 */
+@media (max-width: 700px) {
+  #main-row { flex-direction: column; align-items: center; }
+  #right-panel { min-width: auto; width: 100%; max-width: 500px; }
+  #history { max-height: 260px; }
+}
+</style>
+</head>
+<body>
+
+<div id="toast"></div>
+
+<div id="app">
+  <div id="header">
+    <h1>▣ 直线消除 · 14×10</h1>
+    <div id="toolbar">
+      <button class="btn-init" onclick="initGrid()" title="随机填充网格">🎲 初始化</button>
+      <button class="btn-edit" id="btnEdit" onclick="toggleEditMode()" title="点击格子修改ID">✏️ 编辑模式</button>
+      <button class="btn-hint" onclick="doHint()" title="推导下一步">🔍 推导</button>
+      <button class="btn-auto" id="btnAuto" onclick="toggleAuto()" title="自动执行">▶ 自动</button>
+      <button class="btn-import-grid" onclick="showImportGrid()">📥 导入网格</button>
+      <button class="btn-export-grid" onclick="exportGrid()">📤 导出网格</button>
+      <button class="btn-export-steps" onclick="exportSteps()">📤 导出步骤</button>
+      <button class="btn-import-steps" onclick="showImportSteps()">📥 导入步骤</button>
+    </div>
+  </div>
+
+  <div id="main-row">
+    <div id="grid-container">
+      <div id="grid"></div>
+    </div>
+
+    <div id="right-panel">
+      <h2>📋 操作历史</h2>
+      <div id="history"><div class="empty-hint">暂无操作记录</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- 导入网格弹窗 -->
+<div class="modal-overlay" id="modalGrid">
+  <div class="modal">
+    <h3>📥 导入网格数据</h3>
+    <p style="color:#888;font-size:0.85em;margin-bottom:8px;">每行10个数字（0-32），空格分隔，共14行</p>
+    <textarea id="gridTextarea" placeholder="0 1 2 3 4 5 6 7 8 9&#10;10 11 12 13 14 15 16 17 18 19&#10;..."></textarea>
+    <div class="modal-buttons">
+      <button class="btn-cancel" onclick="closeModal('modalGrid')">取消</button>
+      <button class="btn-confirm" onclick="importGrid()">确认导入</button>
+    </div>
+  </div>
+</div>
+
+<!-- 导入步骤弹窗 -->
+<div class="modal-overlay" id="modalSteps">
+  <div class="modal">
+    <h3>📥 导入步骤数据</h3>
+    <p style="color:#888;font-size:0.85em;margin-bottom:8px;">每行一个JSON数组：<br>["clear",[r1,c1],[r2,c2]]<br>["move",[rA,cA],[rB,cB],[rC,cC]]</p>
+    <textarea id="stepsTextarea" placeholder='["clear",[0,0],[0,3]]&#10;["move",[1,2],[1,3],[5,3]]'></textarea>
+    <div class="modal-buttons">
+      <button class="btn-cancel" onclick="closeModal('modalSteps')">取消</button>
+      <button class="btn-confirm" onclick="importSteps()">确认导入</button>
+    </div>
+  </div>
+</div>
+
+<script src="ylx.js"></script>
+</body>
+</html>
