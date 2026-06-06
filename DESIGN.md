@@ -126,9 +126,9 @@ Fisher-Yates 洗牌
 | 模块 | 位置 | 职责 |
 |------|------|------|
 | HTML 结构 | `ylx.html` | DOM 骨架、样式、弹窗模板 |
-| 状态管理 | `ylx.js` 顶部 | `grid`, `history`, 拖拽临时状态 |
+| 状态管理 | `ylx.js` 顶部 | `grid`, `initialGrid`, `history`, `activeHistoryIndex`, `highlightedCells`, 拖拽临时状态 |
 | 规则引擎 | `ylx.js` — `canMatch` / `isLineClear` / `findAllMatches` | 纯函数，接收网格参数返回匹配结果 |
-| 核心 API | `ylx.js` — `clear()` / `move()` | 规则检查 + 网格修改 + 历史记录 |
+| 核心 API | `ylx.js` — `clear()` / `move()`（纯网格修改）<br>`doClear()` / `doMove()`（带历史+渲染）<br>`applySteps()`（批量应用） | 规则检查 + 网格修改 + 历史/渲染分层 |
 | 渲染层 | `ylx.js` — `renderGrid()` / `renderHistory()` | DOM 更新 |
 | 交互层 | `ylx.js` — mouse/touch 事件 + `finishDrag()` | 拖拽状态机，区分点击与拖拽 |
 
@@ -136,47 +136,28 @@ Fisher-Yates 洗牌
 
 ## 5. 核心 API 详解
 
+所有操作分为两层：**纯网格修改** (`clear`/`move`) 和 **交互包装** (`doClear`/`doMove`)。
+
 ### 5.1 `clear(posA, posB)` → `boolean`
 
-**消除两个格子**。由 `posA` 和 `posB` 指定。
-
-```js
-clear([r1, c1], [r2, c2])
-```
-
-**检查流程**:
-1. 坐标越界检查
-2. 不是同一格
-3. 两个都非空格
-4. 两个值相同
-5. `canMatch(grid, r1, c1, r2, c2)` → 同行/同列且中间无阻
-6. 通过后：将两格设为 0，记录 `{ type:'clear', args:[[r1,c1],[r2,c2]] }`
-
-**返回值**: `true`（成功） / `false`（失败，网格不变）
-
----
+纯函数：清除旧高亮 → 验证规则 → 修改 `grid` → 设置 `highlightedCells`。**不操作 history，不渲染**。
 
 ### 5.2 `move(posA, posB, posC)` → `boolean`
 
-**拖拽移动后消除**。`posA` 拖到 `posB`（同行/同列任意距离），然后 `posB` 与 `posC` 消除。
+纯函数：清除旧高亮 → 验证规则 → 链式移动 + 消除 → 修改 `grid` → 设置 `highlightedCells`。**不操作 history，不渲染**。任何步失败立即恢复 backup。
+
+### 5.2a `doClear` / `doMove` — 交互包装
 
 ```js
-move([rA, cA], [rB, cB], [rC, cC])
+doClear(posA, posB)  → clear() + truncateFuture() + history.push() + renderGrid() + renderHistory()
+doMove(posA,posB,posC) → move()  + truncateFuture() + history.push() + renderGrid() + renderHistory()
 ```
 
-**检查流程**:
-1. 坐标越界检查
-2. `posA` 非空格
-3. `posB` 与 `posA` 同行/同列且不同格
-4. 备份网格 → 执行链式移动，验证实际移动格数 = 请求格数
-5. 检查 `posB` 与 `posC` 是否可直线消除（值相同、中间无阻）
-6. 通过后：消除两个匹配格，记录历史
+所有 UI 交互（点击/拖拽/推导执行/自动播放）均通过 `doClear`/`doMove` 触发。
 
-**回退**: 任何一步失败立即恢复 `backup` 网格
+### 5.2b `applySteps(sourceGrid, steps)` → `boolean`
 
-**返回值**: `true`（成功） / `false`（失败，网格恢复）
-
----
+从 `sourceGrid` 快照克隆 → 逐条调 `clear`/`move` → 批量执行完毕后一次性 `renderGrid()` + `renderHistory()`。用于 `restoreToStep` 和 `importSteps`。
 
 ### 5.3 辅助函数
 
@@ -186,9 +167,13 @@ move([rA, cA], [rB, cB], [rC, cC])
 | `isLineClear` | `(g, r1, c1, r2, c2) → boolean` | 判断两点之间直线是否全空 |
 | `findAllMatches` | `(g, r, c) → [number,number][]` | 找出所有可直线消除的匹配 |
 | `findUnambiguousMatch` | `(g, r, c) → [number,number]\|null` | 找出唯一匹配（无歧义） |
-| `executeChainMoveDir` | `(r, c, dr, dc, shiftCount) → number` | 原地修改 grid 执行链式移动，平移 min(shiftCount, 空格数) 格，返回实际格数 |
+| `executeChainMoveDir` | `(r, c, dr, dc, shiftCount) → number` | 原地修改 grid 执行链式移动 |
 | `getCell` | `(g, r, c) → number` | 安全取值（越界返回 0） |
 | `cloneGrid` | `(g) → number[][]` | 深拷贝网格 |
+| `truncateFuture` | `() → void` | 若用户正查看历史中间步骤，截断该步骤之后的记录 |
+| `restoreToStep` | `(index) → void` | 构建 steps[0..index]，调 `applySteps(initialGrid, steps)` 回退 |
+| `validateStep` | `(step, i) → string\|null` | 校验单条步骤格式，不执行 |
+| `applySteps` | `(sourceGrid, steps) → boolean` | 批量应用步骤，最后一次性渲染 |
 
 ---
 
@@ -207,6 +192,14 @@ move([rA, cA], [rB, cB], [rC, cC])
 ### 5.4a `doHint()` — 推导按钮回调
 
 调用 `hint()`，若有结果则 Toast 显示 `desc`，否则 Toast "无可执行的步骤"。
+
+### 5.4b `doNextStep()` — 下一步按钮回调
+
+调用 `hint()` 获取下一步 → 立即执行 `clear()` 或 `move()`。所有操作（手动点击/拖拽、推导执行、自动播放）均会在网格上高亮消除的格子：
+- `clear(posA,posB)` → `posA` 红色边框 (`.hl-posA`)、`posB` 绿色边框 (`.hl-posB`)
+- `move(posA,posB,posC)` → `posA` 红色边框、`posC` 绿色边框
+
+用户之后点击/拖拽/点击历史条目时自动清除/更新高亮。
 
 ### 5.5 `autoPlay` — 自动按钮
 
@@ -278,13 +271,22 @@ type HistoryEntry =
   | { type: 'move',  args: [[number,number], [number,number], [number,number]] }
 ```
 
-### 7.2 右侧面板
+### 7.2 历史面板交互
 
 - 实时渲染所有成功的 `clear` / `move` 调用
 - 编号 #1, #2, ...
-- 自动滚动到最新
 - `clear` 显示绿色，`move` 显示蓝色
 - 初始/导入网格时清空历史
+
+**点击历史条目回退**:
+- 初始化/导入网格时保存 `initialGrid` 快照
+- 点击某一条目 → `restoreToStep(index)`：
+  - 从 `initialGrid` 快照重新应用 history[0..index] 的每条 `clear`/`move`（链式移动 + 消除）
+  - 设置 `activeHistoryIndex = index`
+  - 高亮该步骤消除的格子
+- 当前查看步骤之后的历史条目变灰（`.dimmed` 样式，opacity 35%）
+- 若此时执行新的消除/移动操作 → 先截断 `activeHistoryIndex` 之后的步骤，再追加新记录，`activeHistoryIndex` 重置为 -1
+- 编辑网格格子的值会重置历史（相当于新的起点）
 
 ---
 
@@ -347,22 +349,24 @@ type HistoryEntry =
 │ │ 14×10 网格   │ │  #1 clear(...)    │
 │ │  38px/格    │ │  #2 move(...)     │
 │ │              │ │  ...              │
-│ └──────────────┘ │                   │
+│ └──────────────┘ │  [📤导出步骤]     │
+│                  │  [📥导入步骤]     │
 └──────────────────┴───────────────────┘
 ```
 
 ### 10.1 按钮清单
 
-| 按钮 | 功能 | 调色 |
-|------|------|------|
-| 🎲 初始化 | 随机生成网格（每个 ID 成对出现） | 深蓝 |
-| ✏️ 编辑模式 | 切换编辑/游玩模式 | 红/绿 |
-| 🔍 推导 | 调用hint()，Toast显示下一步 | 橙色 |
-| ▶ 自动 | 循环执行hint→消除，直到结束 | 绿/红 |
-| 📥 导入网格 | 弹出网格导入框 | 紫 |
-| 📤 导出网格 | 复制网格文本到剪贴板 | 紫 |
-| 📤 导出步骤 | 复制步骤 JSON 到剪贴板 | 深色 |
-| 📥 导入步骤 | 弹出步骤导入框 | 深色 |
+| 按钮 | 位置 | 功能 | 调色 |
+|------|------|------|------|
+| 🎲 初始化 | header | 随机生成网格（每个 ID 成对出现） | 深蓝 |
+| ✏️ 编辑模式 | header | 切换编辑/游玩模式 | 红/绿 |
+| 🔍 推导 | header | 调用hint()，Toast显示下一步 | 橙色 |
+| ➡ 下一步 | header | 推导并立即执行，高亮消除格 | 蓝色 |
+| ▶ 自动 | header | 循环执行hint→消除，直到结束 | 绿/红 |
+| 📥 导入网格 | header | 弹出网格导入框 | 紫 |
+| 📤 导出网格 | header | 复制网格文本到剪贴板 | 紫 |
+| 📤 导出步骤 | 历史栏 | 复制步骤到剪贴板 | 深色 |
+| 📥 导入步骤 | 历史栏 | 弹出步骤导入框 | 深色 |
 
 ### 10.2 主题
 
@@ -406,6 +410,8 @@ type HistoryEntry =
 | 拖拽后恰好 1 匹配 | 保留移动 + 消除 (`move`)，链条可能平移多格 |
 | 编辑模式下点击 | 弹出 prompt 修改 ID |
 | 导入步骤某步失败 | 停止 + Toast 报错（已成功的步骤保留） |
+| 点击历史条目 | 回退网格到该步骤状态，后续步骤变灰 |
+| 回退历史后执行新操作 | 截断当前步骤之后的记录，追加新步骤 |
 
 ---
 

@@ -8,13 +8,16 @@ const COLORS = [];
 for (let i = 0; i <= MAX_ID; i++) {
   if (i === 0) { COLORS[i] = ''; continue; }
   let hue = (i - 1) * 360 / MAX_ID;
-  COLORS[i] = `hsl(${hue.toFixed(1)}, 65%, 50%)`;
+  COLORS[i] = `hsl(${hue.toFixed(1)}, 38%, 50%)`;
 }
 
 // ============ 状态 ============
 let grid = [];           // ROWS x COLS 二维数组，0=空格
+let initialGrid = null;  // 初始化/导入时的快照，用于回退重放
 let history = [];        // 操作历史 [{type:'clear'|'move', args:[...]}]
+let activeHistoryIndex = -1;  // 当前查看的历史步骤索引，-1=最新
 let editMode = false;
+let highlightedCells = [];  // 最多两个高亮格子 [[rA,cA], [rB,cB]]，[0]=红色(posA), [1]=绿色
 
 // 拖拽状态
 let dragStartCell = null;    // {r, c} 拖拽起始格
@@ -98,10 +101,16 @@ function findUnambiguousMatch(g, r, c) {
 
 // ============ 核心函数 ============
 
+/** 如果用户在查看历史中间时做了新操作，先截断后续步骤 */
+function truncateFuture() {
+  if (activeHistoryIndex >= 0 && activeHistoryIndex < history.length - 1) {
+    history = history.slice(0, activeHistoryIndex + 1);
+  }
+  activeHistoryIndex = -1;
+}
+
 /**
- * 消除 posA 和 posB 两个格子
- * @param {[number,number]} posA - [row, col]
- * @param {[number,number]} posB - [row, col]
+ * 消除 posA 和 posB 两个格子（纯网格修改，不处理历史/渲染）
  * @returns {boolean} 是否成功
  */
 function clear(posA, posB) {
@@ -116,22 +125,18 @@ function clear(posA, posB) {
   if (grid[r1][c1] !== grid[r2][c2]) return false;
   if (!canMatch(grid, r1, c1, r2, c2)) return false;
 
+  // 清除旧高亮
+  highlightedCells = [];
   // 执行消除
   grid[r1][c1] = 0;
   grid[r2][c2] = 0;
-
-  // 记录历史
-  history.push({ type: 'clear', args: [posA, posB] });
-  renderGrid();
-  renderHistory();
+  // 设置高亮：posA 红框, posB 绿框
+  highlightedCells = [[r1, c1], [r2, c2]];
   return true;
 }
 
 /**
- * 拖动 posA 到 posB，并与 posC 一起消除
- * @param {[number,number]} posA - 被拖动格子的起始位置
- * @param {[number,number]} posB - 被拖动格子的目标位置（与posA同行或同列，任意距离）
- * @param {[number,number]} posC - 与 posB 匹配消除的格子
+ * 拖动 posA 到 posB，并与 posC 一起消除（纯网格修改，不处理历史/渲染）
  * @returns {boolean} 是否成功
  */
 function move(posA, posB, posC) {
@@ -145,7 +150,6 @@ function move(posA, posB, posC) {
   if (rC < 0 || rC >= ROWS || cC < 0 || cC >= COLS) return false;
   if (grid[rA][cA] === 0) return false;
 
-  // posA 和 posB 必须同行或同列
   let dr = rB - rA;
   let dc = cB - cA;
   if (dr !== 0 && dc !== 0) return false;
@@ -155,36 +159,59 @@ function move(posA, posB, posC) {
   let dirC = Math.sign(dc);
   let requestedDist = Math.abs(dr) + Math.abs(dc);
 
-  // 备份并执行链式移动
   let backup = cloneGrid(grid);
   let actualDist = executeChainMoveDir(rA, cA, dirR, dirC, requestedDist);
-
-  // 实际移动格数必须等于请求的格数
   if (actualDist !== requestedDist) {
     grid = backup;
     return false;
   }
 
-  // 检查 posB 和 posC 是否可以消除（只检查被拖动的那个格子）
-  if (grid[rB][cB] === 0 || grid[rC][cC] === 0) {
-    grid = backup;
-    return false;
-  }
-  if (grid[rB][cB] !== grid[rC][cC]) {
-    grid = backup;
-    return false;
-  }
-  if (!canMatch(grid, rB, cB, rC, cC)) {
-    grid = backup;
-    return false;
-  }
+  if (grid[rB][cB] === 0 || grid[rC][cC] === 0) { grid = backup; return false; }
+  if (grid[rB][cB] !== grid[rC][cC]) { grid = backup; return false; }
+  if (!canMatch(grid, rB, cB, rC, cC)) { grid = backup; return false; }
 
+  // 清除旧高亮
+  highlightedCells = [];
   // 执行消除
   grid[rB][cB] = 0;
   grid[rC][cC] = 0;
+  // 设置高亮：posA 红框, posC 绿框
+  highlightedCells = [[rA, cA], [rC, cC]];
+  return true;
+}
 
-  // 记录历史
+/** 带历史记录+渲染的 clear 包装 */
+function doClear(posA, posB) {
+  if (!clear(posA, posB)) return false;
+  truncateFuture();
+  history.push({ type: 'clear', args: [posA, posB] });
+  renderGrid();
+  renderHistory();
+  return true;
+}
+
+/** 带历史记录+渲染的 move 包装 */
+function doMove(posA, posB, posC) {
+  if (!move(posA, posB, posC)) return false;
+  truncateFuture();
   history.push({ type: 'move', args: [posA, posB, posC] });
+  renderGrid();
+  renderHistory();
+  return true;
+}
+
+/** 从 sourceGrid 快照开始，批量执行 steps（每条 [type, ...args]），最后一次性渲染 */
+function applySteps(sourceGrid, steps) {
+  grid = cloneGrid(sourceGrid);
+  highlightedCells = [];
+  for (let i = 0; i < steps.length; i++) {
+    let [type, ...args] = steps[i];
+    if (type === 'clear') {
+      if (!clear(args[0], args[1])) return false;
+    } else {
+      if (!move(args[0], args[1], args[2])) return false;
+    }
+  }
   renderGrid();
   renderHistory();
   return true;
@@ -271,6 +298,9 @@ function initGrid() {
   }
 
   history = [];
+  activeHistoryIndex = -1;
+  highlightedCells = [];
+  initialGrid = cloneGrid(grid);
   renderGrid();
   renderHistory();
   showToast('网格已初始化', 'success');
@@ -300,6 +330,10 @@ function renderGrid() {
       cell.dataset.row = r;
       cell.dataset.col = c;
 
+      // 高亮：第0个红框(posA)，第1个绿框
+      let idx = highlightedCells.findIndex(([hr, hc]) => hr === r && hc === c);
+      if (idx >= 0) cell.classList.add(idx === 0 ? 'hl-posA' : 'hl-posB');
+
       cell.addEventListener('mousedown', onCellMouseDown);
       cell.addEventListener('touchstart', onCellTouchStart, { passive: false });
 
@@ -318,6 +352,8 @@ function renderHistory() {
   let html = '';
   history.forEach((entry, i) => {
     let cls = entry.type === 'clear' ? 'clear-type' : 'move-type';
+    // 当前查看步骤之后的条目灰色
+    if (activeHistoryIndex >= 0 && i > activeHistoryIndex) cls += ' dimmed';
     let desc = '';
     if (entry.type === 'clear') {
       let [a, b] = entry.args;
@@ -326,10 +362,29 @@ function renderHistory() {
       let [a, b, c] = entry.args;
       desc = `move([${a[0]},${a[1]}], [${b[0]},${b[1]}], [${c[0]},${c[1]}])`;
     }
-    html += `<div class="entry ${cls}"><span class="idx">#${i + 1}</span>${desc}</div>`;
+    html += `<div class="entry ${cls}" onclick="restoreToStep(${i})"><span class="idx">#${i + 1}</span>${desc}</div>`;
   });
   histEl.innerHTML = html;
-  histEl.scrollTop = histEl.scrollHeight;
+  // 只有查看最新时才自动滚到底部
+  if (activeHistoryIndex < 0) histEl.scrollTop = histEl.scrollHeight;
+}
+
+/** 回退到指定历史步骤（从 initialGrid 重新应用 history[0..index]） */
+function restoreToStep(index) {
+  if (!initialGrid) return;
+  if (index < -1 || index >= history.length) return;
+
+  let steps = [];
+  for (let i = 0; i <= index; i++) {
+    let entry = history[i];
+    steps.push([entry.type, ...entry.args]);
+  }
+
+  if (!applySteps(initialGrid, steps)) return;
+
+  activeHistoryIndex = index;
+  renderGrid();
+  renderHistory();
 }
 
 // ============ 编辑模式 ============
@@ -356,8 +411,13 @@ function editCell(r, c) {
     showToast('无效ID，请输入0-' + MAX_ID, 'error');
     return;
   }
+  highlightedCells = [];
+  activeHistoryIndex = -1;
+  history = [];
   grid[r][c] = val;
+  initialGrid = cloneGrid(grid);
   renderGrid();
+  renderHistory();
   showToast(`已将 [${r},${c}] 设为 ${val}`, 'success');
 }
 
@@ -383,10 +443,13 @@ function onCellMouseDown(e) {
 
   if (grid[info.r][info.c] === 0) return; // 空格不响应
 
+  // 清除高亮
+  clearHighlights();
+
   // 先检查是否可以直接点击消除
   let match = findUnambiguousMatch(grid, info.r, info.c);
   if (match) {
-    clear([info.r, info.c], match);
+    doClear([info.r, info.c], match);
     e.preventDefault();
     return; // 消除了就不再进入拖拽
   }
@@ -414,10 +477,13 @@ function onCellTouchStart(e) {
 
   if (grid[info.r][info.c] === 0) return;
 
+  // 清除高亮
+  clearHighlights();
+
   // 先检查是否可以直接点击消除
   let match = findUnambiguousMatch(grid, info.r, info.c);
   if (match) {
-    clear([info.r, info.c], match);
+    doClear([info.r, info.c], match);
     e.preventDefault();
     return;
   }
@@ -548,7 +614,7 @@ function finishDrag() {
       // 唯一匹配 → 先恢复备份，再通过 move() 原子执行
       let [rC, cC] = movedMatches[0];
       grid = dragGridBackup;
-      if (!move([rA, cA], dragPosB, [rC, cC])) {
+      if (!doMove([rA, cA], dragPosB, [rC, cC])) {
         renderGrid();
         showToast('拖动后无法消除，已撤回', 'error');
       }
@@ -583,6 +649,13 @@ function highlightCell(r, c, cls) {
   document.querySelectorAll('.cell.drag-preview').forEach(el => el.classList.remove('drag-preview'));
   let cell = document.querySelector(`.cell[data-row="${r}"][data-col="${c}"]`);
   if (cell && cls) cell.classList.add(cls);
+}
+
+/** 清除所有高亮 */
+function clearHighlights() {
+  if (highlightedCells.length === 0) return;
+  highlightedCells = [];
+  renderGrid();
 }
 
 // ============ 推导 ============
@@ -661,6 +734,27 @@ function doHint() {
   }
 }
 
+/** 下一步按钮回调：调用hint获取下一步并立即执行，同时高亮消除的格子 */
+function doNextStep() {
+  let step = hint();
+  if (!step) {
+    showToast('😞 无可执行的步骤', 'error');
+    return;
+  }
+
+  let ok;
+  if (step.type === 'clear') {
+    ok = doClear(step.posA, step.posB);
+  } else {
+    ok = doMove(step.posA, step.posB, step.posC);
+  }
+
+  if (!ok) {
+    showToast('执行失败（规则不满足）', 'error');
+  }
+  // 高亮已在 clear/move 内部设置
+}
+
 // ============ 自动播放 ============
 
 let autoTimer = null;
@@ -703,9 +797,9 @@ function autoStep() {
   // 执行步骤
   let ok;
   if (step.type === 'clear') {
-    ok = clear(step.posA, step.posB);
+    ok = doClear(step.posA, step.posB);
   } else {
-    ok = move(step.posA, step.posB, step.posC);
+    ok = doMove(step.posA, step.posB, step.posC);
   }
 
   if (!ok) {
@@ -715,7 +809,7 @@ function autoStep() {
   }
 
   // 延时继续
-  autoTimer = setTimeout(autoStep, 150);
+  autoTimer = setTimeout(autoStep, 100);
 }
 
 /* executeChainMoveDir 的纯函数版本（不修改全局grid） */
@@ -797,7 +891,10 @@ function importGrid() {
   }
 
   grid = newGrid;
+  initialGrid = cloneGrid(grid);
   history = [];
+  activeHistoryIndex = -1;
+  highlightedCells = [];
   closeModal('modalGrid');
   renderGrid();
   renderHistory();
@@ -828,6 +925,24 @@ function showImportSteps() {
   document.getElementById('modalSteps').classList.add('show');
 }
 
+/** 验证单个 step 格式有效性（不执行） */
+function validateStep(step, i) {
+  if (!Array.isArray(step) || step.length < 3) {
+    return '步骤 #' + (i + 1) + ' 格式错误';
+  }
+  let [type, ...args] = step;
+  if (type === 'clear') {
+    if (args.length !== 2 || !Array.isArray(args[0]) || !Array.isArray(args[1]))
+      return '步骤 #' + (i + 1) + ' clear 参数格式错误';
+  } else if (type === 'move') {
+    if (args.length !== 3 || !Array.isArray(args[0]) || !Array.isArray(args[1]) || !Array.isArray(args[2]))
+      return '步骤 #' + (i + 1) + ' move 参数格式错误';
+  } else {
+    return '步骤 #' + (i + 1) + ' 未知类型: ' + type;
+  }
+  return null;
+}
+
 /** 导入步骤 */
 function importSteps() {
   let text = document.getElementById('stepsTextarea').value.trim();
@@ -837,10 +952,8 @@ function importSteps() {
   }
 
   let steps;
-  // 尝试按行解析（每行一个 JSON 数组），兼容旧版整体数组
   let lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
   try {
-    // 先尝试整体 JSON 解析（兼容旧版）
     let parsed = JSON.parse(text);
     if (Array.isArray(parsed) && parsed.length > 0 && Array.isArray(parsed[0])) {
       steps = parsed;
@@ -848,7 +961,6 @@ function importSteps() {
       throw new Error('not array of arrays');
     }
   } catch (e1) {
-    // 按行解析
     try {
       steps = [];
       for (let line of lines) {
@@ -867,41 +979,27 @@ function importSteps() {
     return;
   }
 
-  // 验证并执行每一步
+  // 一次性验证所有步骤格式
   for (let i = 0; i < steps.length; i++) {
-    let step = steps[i];
-    if (!Array.isArray(step) || step.length < 3) {
-      showToast('步骤 #' + (i + 1) + ' 格式错误', 'error');
-      return;
-    }
-
-    let [type, ...args] = step;
-
-    if (type === 'clear') {
-      if (args.length !== 2 || !Array.isArray(args[0]) || !Array.isArray(args[1])) {
-        showToast('步骤 #' + (i + 1) + ' clear 参数格式错误', 'error');
-        return;
-      }
-      if (!clear(args[0], args[1])) {
-        showToast('步骤 #' + (i + 1) + ' clear 执行失败（规则不满足）', 'error');
-        return;
-      }
-    } else if (type === 'move') {
-      if (args.length !== 3 || !Array.isArray(args[0]) || !Array.isArray(args[1]) || !Array.isArray(args[2])) {
-        showToast('步骤 #' + (i + 1) + ' move 参数格式错误', 'error');
-        return;
-      }
-      if (!move(args[0], args[1], args[2])) {
-        showToast('步骤 #' + (i + 1) + ' move 执行失败（规则不满足）', 'error');
-        return;
-      }
-    } else {
-      showToast('步骤 #' + (i + 1) + ' 未知类型: ' + type, 'error');
-      return;
-    }
+    let err = validateStep(steps[i], i);
+    if (err) { showToast(err, 'error'); return; }
   }
 
+  // 从当前网格快照开始，批量应用步骤
+  let snapshot = cloneGrid(grid);
+  if (!applySteps(snapshot, steps)) {
+    showToast('步骤执行失败（规则不满足）', 'error');
+    return;
+  }
+
+  // 构建 history 并设置状态
+  history = steps.map(([type, ...args]) => ({ type, args }));
+  activeHistoryIndex = -1;
+  initialGrid = snapshot;
+  highlightedCells = [];
   closeModal('modalSteps');
+  renderGrid();
+  renderHistory();
   showToast('步骤导入并执行成功（共 ' + steps.length + ' 步）', 'success');
 }
 
