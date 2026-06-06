@@ -99,6 +99,37 @@ h1 {
   overflow: auto;
 }
 
+/* 边缘检测预览布局 */
+.edge-preview-container {
+  display: flex;
+  gap: 15px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.edge-preview-item {
+  text-align: center;
+}
+
+.edge-preview-label {
+  font-size: 0.85em;
+  color: #aaa;
+  margin-bottom: 5px;
+}
+
+.edge-preview-box {
+  background: #000;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.crop-info {
+  margin-top: 10px;
+  font-size: 0.75em;
+  color: #888;
+  text-align: center;
+}
+
 .preview-content canvas {
   max-width: 100%;
   height: auto;
@@ -219,6 +250,106 @@ h1 {
     grid-template-columns: 1fr;
   }
 }
+
+/* 统计表格样式 */
+.stats-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+
+.stats-table th {
+  padding: 6px;
+  border: 1px solid #ddd;
+  background: #e94560;
+  color: #fff;
+  text-align: center;
+}
+
+.stats-table td {
+  padding: 6px;
+  border: 1px solid #ddd;
+}
+
+.stats-table .id-cell {
+  font-weight: bold;
+  text-align: center;
+}
+
+.stats-table .spectrum-cell {
+  text-align: center;
+}
+
+.stats-table .features-cell {
+  font-family: monospace;
+  font-size: 9px;
+  word-break: break-all;
+  white-space: normal;
+  line-height: 1.4;
+}
+
+.stats-table .cells-container {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.stats-table .cell-thumbnail {
+  width: 40px;
+  height: 40px;
+  background: #fff;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.stats-table .cell-thumbnail img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.stats-table .spectrum-img {
+  width: 64px;
+  height: 64px;
+  object-fit: contain;
+  image-rendering: pixelated;
+}
+
+.stats-info {
+  font-family: monospace;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.stats-table-title {
+  margin-top: 15px;
+}
+
+/* 格子网格预览样式 */
+.cell-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  justify-content: flex-start;
+}
+
+.cell-item {
+  width: 50px;
+  height: 50px;
+  background: #fff;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.cell-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.no-data {
+  color: #888;
+}
 </style>
 </head>
 <body>
@@ -233,31 +364,16 @@ h1 {
     <p style="margin-bottom: 20px; color: #888;">
       上传 14×10 网格的游戏截图，自动识别图标并生成网格数据
     </p>
-    <input type="file" id="fileInput" accept="image/png">
+    <input type="file" id="fileInput" accept="image/*">
     <label class="upload-btn" for="fileInput">
-      📁 选择 PNG 图片
+      📁 选择图片
     </label>
     <p style="margin-top: 15px; font-size: 0.85em; color: #666;">
-      支持格式：PNG · 推荐尺寸：1000×1400 像素
+      支持格式：PNG, JPG, GIF, WebP 等
     </p>
     
     <!-- 参数设置区域 -->
     <div id="params-section" style="margin-top: 25px; padding: 15px; background: #0f3460; border-radius: 8px; display: none;">
-      <!-- 边缘检测预览 -->
-      <div id="edge-detection-section" style="margin-bottom: 20px; display: none;">
-        <h3 style="color: #e94560; font-size: 0.95em; margin-bottom: 10px;">🔍 边缘检测结果</h3>
-        <div style="display: flex; gap: 15px; justify-content: center; flex-wrap: wrap;">
-          <div style="text-align: center;">
-            <p style="font-size: 0.85em; color: #aaa; margin-bottom: 5px;">灰度图（256px 宽）</p>
-            <div id="grayPreview" style="background: #000; border-radius: 4px; overflow: hidden;"></div>
-          </div>
-          <div style="text-align: center;">
-            <p style="font-size: 0.85em; color: #aaa; margin-bottom: 5px;">边缘标记（红色）</p>
-            <div id="edgePreview" style="background: #000; border-radius: 4px; overflow: hidden;"></div>
-          </div>
-        </div>
-      </div>
-    
       <!-- 裁剪比例滑块 -->
       <div style="margin-bottom: 20px;">
         <h3 style="color: #e94560; font-size: 0.95em; margin-bottom: 10px;">✂️ 裁剪比例设置</h3>
@@ -328,14 +444,14 @@ h1 {
         <h3 style="color: #e94560; font-size: 0.95em; margin-bottom: 10px;">🎚️ 相似度阈值</h3>
         <div style="display: flex; align-items: center; gap: 15px; justify-content: center;">
           <span style="font-size: 0.85em; color: #aaa;">更严格</span>
-          <input type="range" id="thresholdSlider" min="0" max="15" value="5" step="1" 
+          <input type="range" id="thresholdSlider" min="0" max="8" value="0.1" step="0.01" 
                  style="width: 300px; cursor: pointer;" 
-                 title="汉明距离阈值：越小越严格，越大越宽松">
+                 title="L1 距离阈值：越小越严格，越大越宽松">
           <span style="font-size: 0.85em; color: #aaa;">更宽松</span>
         </div>
         <div style="text-align: center; margin-top: 8px; font-size: 0.9em;">
-          当前阈值：<strong id="thresholdValue" style="color: #e94560; font-size: 1.2em;">5</strong>
-          <span style="color: #888; margin-left: 10px;">（汉明距离 ≤ 此值视为相同图标）</span>
+          当前阈值：<strong id="thresholdValue" style="color: #e94560; font-size: 1.2em;">0.1</strong>
+          <span style="color: #888; margin-left: 10px;">（L1 距离 ≤ 此值视为相同图标）</span>
         </div>
       </div>
     </div>
@@ -344,17 +460,24 @@ h1 {
   <!-- 预览区域 -->
   <div id="preview-section">
     <div class="preview-grid">
-      <!-- 原始图片 -->
+      <!-- 边缘检测结果 -->
       <div class="preview-card">
-        <h3>📷 原始图片</h3>
-        <div class="preview-content" id="originalPreview"></div>
-      </div>
-      
-      <!-- 缩放裁剪后 -->
-      <div class="preview-card">
-        <h3>✂️ 裁剪后（网格区域）</h3>
-        <div class="preview-content" id="resizedPreview"></div>
-        <div id="cropInfo" style="margin-top: 10px; font-size: 0.8em; color: #888; text-align: center;"></div>
+        <h3>🔍 边缘检测结果</h3>
+        <div class="edge-preview-container">
+          <div class="edge-preview-item">
+            <div class="edge-preview-label">灰度图（256px 宽）</div>
+            <div class="edge-preview-box" id="grayPreview"></div>
+          </div>
+          <div class="edge-preview-item">
+            <div class="edge-preview-label">边缘标记（红色）</div>
+            <div class="edge-preview-box" id="edgePreview"></div>
+          </div>
+          <div class="edge-preview-item">
+            <div class="edge-preview-label">裁剪后区域</div>
+            <div class="edge-preview-box" id="resizedPreview"></div>
+            <div class="crop-info" id="cropInfo"></div>
+          </div>
+        </div>
       </div>
       
       <!-- 格子网格 -->
@@ -380,8 +503,6 @@ h1 {
       
       <div id="toolbar">
         <button class="btn-copy" onclick="copyToClipboard()">📋 复制到剪贴板</button>
-        <button class="btn-download" onclick="downloadGrid()">💾 下载为文件</button>
-        <button class="btn-reset" onclick="resetParser()">🔄 重新解析</button>
       </div>
     </div>
   </div>
@@ -409,15 +530,15 @@ let cropRightSlider = document.getElementById('cropRightSlider');
 let cropRightValue = document.getElementById('cropRightValue');
 let cropRightPercent = document.getElementById('cropRightPercent');
 let paramsSection = document.getElementById('params-section');
-let edgeDetectionSection = document.getElementById('edge-detection-section');
 
 // 文件选择事件 - 第一步：边缘检测
 document.getElementById('fileInput').addEventListener('change', async function(e) {
   let file = e.target.files[0];
   if (!file) return;
   
-  if (file.type !== 'image/png') {
-    showToast('请选择 PNG 格式的图片', 'error');
+  // 检查是否为浏览器支持的图片格式
+  if (!file.type.startsWith('image/')) {
+    showToast('请选择图片文件', 'error');
     return;
   }
   
@@ -425,7 +546,6 @@ document.getElementById('fileInput').addEventListener('change', async function(e
   
   // 显示参数设置区域
   paramsSection.style.display = 'block';
-  edgeDetectionSection.style.display = 'block';
   
   // 隐藏后续区域
   document.getElementById('preview-section').style.display = 'none';
@@ -437,9 +557,6 @@ document.getElementById('fileInput').addEventListener('change', async function(e
   try {
     // 执行边缘检测
     edgeDetectionResult = await performEdgeDetection(file);
-    
-    // 显示原始图片
-    renderOriginalPreview(edgeDetectionResult.originalCanvas);
     
     // 显示灰度图和边缘标记
     let grayPreview = document.getElementById('grayPreview');
@@ -496,18 +613,18 @@ async function performCropAndMatch() {
       CROP_RIGHT_RATIO
     );
     
-    // 显示裁剪后的网格区域
+    // 显示裁剪后的网格区域（在边缘检测结果区域）
     renderResizedPreview(cropResult.croppedCanvas, 'resizedPreview');
     
     // 更新裁剪信息
     let cropInfo = document.getElementById('cropInfo');
-    cropInfo.innerHTML = `裁剪区域：${cropResult.cropParams.w}×${cropResult.cropParams.h} · 格子尺寸：${cropResult.cellW}×${cropResult.cellH}`;
+    cropInfo.innerHTML = `裁剪区域：${cropResult.cropParams.w}×${cropResult.cropParams.h}<br>格子尺寸：${cropResult.cellW}×${cropResult.cellH}`;
     
-    // 第二阶段：哈希匹配
-    matchResult = matchHashes(cropResult.cellCanvases, SIMILARITY_THRESHOLD);
+    // 第二阶段：哈希匹配（使用预计算的特征）
+    matchResult = matchHashes(cropResult.cellData, SIMILARITY_THRESHOLD);
     
-    // 显示格子网格
-    renderCellGrid(matchResult.gridHashes, 'cellGridPreview');
+    // 显示格子网格（按裁剪顺序）
+    renderCellGrid(cropResult.cellData, 'cellGridPreview');
     
     // 显示统计信息
     renderStats(matchResult.stats, 'statsContent');
@@ -531,18 +648,18 @@ async function performCropAndMatch() {
 thresholdSlider.addEventListener('change', function() {
   if (!cropResult) return;
   
-  let newThreshold = parseInt(thresholdSlider.value);
+  let newThreshold = parseFloat(thresholdSlider.value);
   thresholdValue.textContent = newThreshold;
   SIMILARITY_THRESHOLD = newThreshold;
   
   showToast('正在重新匹配哈希（阈值=' + newThreshold + '）...', 'success');
   
   try {
-    // 只重新做哈希匹配（第四步）
-    matchResult = matchHashes(cropResult.cellCanvases, newThreshold);
+    // 只重新做哈希匹配（使用预计算的特征）
+    matchResult = matchHashes(cropResult.cellData, newThreshold);
     
     // 更新显示
-    renderCellGrid(matchResult.gridHashes, 'cellGridPreview');
+    renderCellGrid(cropResult.cellData, 'cellGridPreview');
     renderStats(matchResult.stats, 'statsContent');
     
     let gridText = exportGridText(matchResult.grid);
@@ -635,37 +752,11 @@ cropRightSlider.addEventListener('change', async function() {
   await performCropAndMatch();
 });
 
-// 渲染原始图片预览
-function renderOriginalPreview(canvas) {
-  let container = document.getElementById('originalPreview');
-  container.innerHTML = '';
-  
-  let preview = document.createElement('canvas');
-  preview.width = 200;
-  preview.height = Math.floor(200 * canvas.height / canvas.width);
-  let ctx = preview.getContext('2d');
-  ctx.drawImage(canvas, 0, 0, preview.width, preview.height);
-  
-  container.appendChild(preview);
-}
-
 function copyToClipboard() {
   let output = document.getElementById('gridOutput');
   output.select();
   document.execCommand('copy');
   showToast('已复制到剪贴板', 'success');
-}
-
-function downloadGrid() {
-  let gridText = document.getElementById('gridOutput').value;
-  let blob = new Blob([gridText], { type: 'text/plain' });
-  let url = URL.createObjectURL(blob);
-  let a = document.createElement('a');
-  a.href = url;
-  a.download = 'grid_' + new Date().getTime() + '.txt';
-  a.click();
-  URL.revokeObjectURL(url);
-  showToast('文件已下载', 'success');
 }
 
 function resetParser() {
@@ -674,13 +765,12 @@ function resetParser() {
   document.getElementById('preview-section').style.display = 'none';
   document.getElementById('output-section').style.display = 'none';
   document.getElementById('stats-section').style.display = 'none';
-  edgeDetectionSection.style.display = 'none';
   currentFile = null;
   edgeDetectionResult = null;
   cropResult = null;
   matchResult = null;
-  thresholdSlider.value = 5;
-  thresholdValue.textContent = '5';
+  thresholdSlider.value = 0.1;
+  thresholdValue.textContent = '0.1';
   showToast('已重置', 'success');
 }
 
